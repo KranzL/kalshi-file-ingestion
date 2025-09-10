@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """
-Kalshi Fast Ingestion Script - Simplified version with SSL fixes
-Works on macOS without certificate issues
+Kalshi Market Data Fetcher
+Efficiently downloads all market data from Kalshi's public API
 """
 
 import json
@@ -14,21 +13,10 @@ from threading import Lock
 import requests
 import urllib3
 
-# Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class KalshiSimpleIngester:
-    """Fast parallel ingestion for Kalshi markets using threading."""
-    
+class KalshiMarketFetcher:
     def __init__(self, max_workers=10, batch_size=1000, verify_ssl=False):
-        """
-        Initialize the ingester.
-        
-        Args:
-            max_workers: Number of parallel workers
-            batch_size: Markets per API request (max 1000)
-            verify_ssl: Whether to verify SSL certificates
-        """
         self.base_url = "https://api.elections.kalshi.com/trade-api/v2/markets"
         self.max_workers = max_workers
         self.batch_size = min(batch_size, 1000)
@@ -41,10 +29,8 @@ class KalshiSimpleIngester:
         }
         self.stats_lock = Lock()
         self.output_dir = None
-        self.all_cursors = []
         
     def create_output_directory(self):
-        """Create timestamped output directory."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.output_dir = f"kalshi_markets_{timestamp}"
         os.makedirs(self.output_dir, exist_ok=True)
@@ -52,7 +38,6 @@ class KalshiSimpleIngester:
         return self.output_dir
     
     def fetch_page(self, page_num, cursor=None, status=None):
-        """Fetch a single page of markets."""
         params = {'limit': self.batch_size}
         if cursor:
             params['cursor'] = cursor
@@ -79,18 +64,14 @@ class KalshiSimpleIngester:
                 self.stats['errors'].append(f"Page {page_num}: {str(e)[:100]}")
             return None
     
-    def fetch_sequential_with_progress(self, status=None, save_chunks=True):
-        """Fetch all pages sequentially with progress display."""
+    def fetch_sequential(self, status=None):
         print(f"\n📊 Fetching markets{' (status=' + status + ')' if status else ''}...")
         
         cursor = None
         page = 0
-        all_markets = []
         
         while True:
             page += 1
-            
-            # Fetch page
             data = self.fetch_page(page, cursor, status)
             
             if not data:
@@ -100,41 +81,28 @@ class KalshiSimpleIngester:
             if not markets:
                 break
             
-            # Update stats
             with self.stats_lock:
                 self.stats['total_markets'] += len(markets)
                 self.stats['pages_fetched'] += 1
             
-            # Save chunk immediately to avoid memory issues
-            if save_chunks and self.output_dir:
-                chunk_file = os.path.join(self.output_dir, "chunks", f"chunk_{page:06d}.json")
-                with open(chunk_file, 'w') as f:
-                    json.dump(markets, f)
-            else:
-                all_markets.extend(markets)
+            chunk_file = os.path.join(self.output_dir, "chunks", f"chunk_{page:06d}.json")
+            with open(chunk_file, 'w') as f:
+                json.dump(markets, f)
             
-            # Progress update
             if page % 5 == 0:
                 elapsed = time.time() - self.stats['start_time']
                 rate = self.stats['total_markets'] / elapsed if elapsed > 0 else 0
                 print(f"  Page {page}: {self.stats['total_markets']:,} markets "
                       f"({rate:.0f} markets/sec)")
             
-            # Get next cursor
             cursor = data.get('cursor')
             if not cursor:
                 break
-        
-        return all_markets if not save_chunks else None
     
-    def fetch_parallel_smart(self, status=None, save_chunks=True):
-        """
-        Smart parallel fetching - first get all cursors, then fetch in parallel.
-        """
+    def fetch_parallel(self, status=None):
         print(f"\n🔍 Phase 1: Discovering pages...")
         
-        # First pass: collect all cursors
-        cursors = [None]  # Start with None for first page
+        cursors = [None]
         cursor = None
         page = 0
         
@@ -158,7 +126,6 @@ class KalshiSimpleIngester:
         total_pages = len(cursors)
         print(f"  ✅ Found {total_pages} pages to fetch")
         
-        # Second pass: fetch all pages in parallel
         print(f"\n⚡ Phase 2: Parallel fetch with {self.max_workers} workers...")
         
         def fetch_and_save(args):
@@ -168,12 +135,10 @@ class KalshiSimpleIngester:
             if data:
                 markets = data.get('markets', [])
                 
-                # Update stats
                 with self.stats_lock:
                     self.stats['total_markets'] += len(markets)
                     self.stats['pages_fetched'] += 1
                     
-                    # Progress update
                     if self.stats['pages_fetched'] % 10 == 0:
                         elapsed = time.time() - self.stats['start_time']
                         rate = self.stats['total_markets'] / elapsed if elapsed > 0 else 0
@@ -181,63 +146,36 @@ class KalshiSimpleIngester:
                         print(f"  Progress: {percent:.1f}% - {self.stats['total_markets']:,} markets "
                               f"({rate:.0f} markets/sec)")
                 
-                # Save chunk
-                if save_chunks and self.output_dir:
-                    chunk_file = os.path.join(self.output_dir, "chunks", f"chunk_{page_num:06d}.json")
-                    with open(chunk_file, 'w') as f:
-                        json.dump(markets, f)
-                    return None
-                else:
-                    return markets
-            
-            return None
+                chunk_file = os.path.join(self.output_dir, "chunks", f"chunk_{page_num:06d}.json")
+                with open(chunk_file, 'w') as f:
+                    json.dump(markets, f)
         
-        # Create work items (page number, cursor)
         work_items = list(enumerate(cursors, 1))
         
-        # Execute in parallel
-        all_markets = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            results = executor.map(fetch_and_save, work_items)
-            
-            if not save_chunks:
-                for result in results:
-                    if result:
-                        all_markets.extend(result)
-        
-        return all_markets if not save_chunks else None
+            list(executor.map(fetch_and_save, work_items))
     
     def run(self, method='parallel', status_filter=None):
-        """
-        Main entry point for ingestion.
-        
-        Args:
-            method: 'parallel' or 'sequential'
-            status_filter: Filter by market status
-        """
         self.stats['start_time'] = time.time()
         self.create_output_directory()
         
         print("=" * 60)
-        print("KALSHI FAST INGESTION")
+        print("KALSHI MARKET DATA FETCHER")
         print("=" * 60)
         print(f"Method: {method}")
         print(f"Workers: {self.max_workers if method == 'parallel' else 1}")
-        print(f"Batch size: {self.batch_size}")
-        print(f"SSL verification: {self.verify_ssl}")
         print(f"Output directory: {self.output_dir}")
         print("-" * 60)
         
         if method == 'parallel':
-            markets = self.fetch_parallel_smart(status_filter, save_chunks=True)
+            self.fetch_parallel(status_filter)
         else:
-            markets = self.fetch_sequential_with_progress(status_filter, save_chunks=True)
+            self.fetch_sequential(status_filter)
         
-        # Show results
         elapsed = time.time() - self.stats['start_time']
         
         print("\n" + "=" * 60)
-        print("INGESTION COMPLETE")
+        print("DOWNLOAD COMPLETE")
         print("=" * 60)
         print(f"Total markets: {self.stats['total_markets']:,}")
         print(f"Pages fetched: {self.stats['pages_fetched']:,}")
@@ -251,12 +189,11 @@ class KalshiSimpleIngester:
             for err in self.stats['errors'][:5]:
                 print(f"  - {err}")
         
-        print(f"\n📁 Data saved in: {self.output_dir}/chunks/")
+        print(f"\n📁 Data saved in: {self.output_dir}/")
         
         return self.stats
     
     def merge_chunks(self, group_by='status'):
-        """Merge chunk files into organized structure."""
         if not self.output_dir:
             print("No output directory set")
             return
@@ -268,7 +205,6 @@ class KalshiSimpleIngester:
         
         print("\n📦 Merging chunks...")
         
-        # Count chunk files
         chunk_files = sorted([f for f in os.listdir(chunks_dir) if f.endswith('.json')])
         total_files = len(chunk_files)
         print(f"  Found {total_files} chunk files")
@@ -276,7 +212,6 @@ class KalshiSimpleIngester:
         if group_by:
             grouped = defaultdict(list)
             
-            # Read and group markets
             for i, filename in enumerate(chunk_files):
                 if i % 50 == 0:
                     print(f"  Processing chunk {i}/{total_files}...")
@@ -301,7 +236,6 @@ class KalshiSimpleIngester:
                 except Exception as e:
                     print(f"  ⚠️ Error reading {filename}: {e}")
             
-            # Save grouped files
             group_dir = os.path.join(self.output_dir, f"by_{group_by}")
             os.makedirs(group_dir, exist_ok=True)
             
@@ -322,7 +256,6 @@ class KalshiSimpleIngester:
             print(f"\n📁 Grouped files saved in: {group_dir}/")
         
         else:
-            # Save as single file
             all_markets = []
             
             for i, filename in enumerate(chunk_files):
@@ -343,12 +276,7 @@ class KalshiSimpleIngester:
             
             print(f"  💾 Saved {len(all_markets):,} markets to {output_file}")
 
-def main():
-    """Main entry point."""
-    print("\n⚡ KALSHI FAST INGESTION (SSL SAFE VERSION)")
-    print("=" * 60)
-    
-    # Test connection
+def test_connection():
     print("Testing connection to Kalshi API...")
     try:
         test_url = "https://api.elections.kalshi.com/trade-api/v2/markets"
@@ -356,65 +284,69 @@ def main():
         
         if response.status_code == 200:
             data = response.json()
-            market_count = len(data.get('markets', []))
-            print(f"✅ Connection successful! API is responding.")
+            print(f"✅ Connection successful!")
             if data.get('cursor'):
-                print("📊 Multiple pages detected - there are MANY markets to fetch")
+                print("📊 Multiple pages detected - large dataset available")
+            return True
         else:
             print(f"⚠️ API returned status {response.status_code}")
+            return False
             
     except Exception as e:
         print(f"❌ Connection failed: {e}")
+        return False
+
+def main():
+    print("\n⚡ KALSHI MARKET DATA FETCHER")
+    print("=" * 60)
+    
+    if not test_connection():
         return
     
-    print("\nIngestion Options:")
+    print("\nDownload Options:")
     print("  1. Fast parallel (recommended)")
-    print("  2. Sequential (slower but more stable)")
+    print("  2. Sequential (slower but stable)")
     
     method_choice = input("\nSelect method (1-2, default=1): ").strip() or '1'
     
-    print("\nStatus Filters:")
-    print("  a. All markets (500K+, will take time)")
-    print("  b. Open markets only")
-    print("  c. Closed markets only")
-    print("  d. Settled markets only")
+    print("\nMarket Status Filter:")
+    print("  a. All markets (500K+)")
+    print("  b. Open markets only (~3K)")
+    print("  c. Closed markets")
+    print("  d. Settled markets")
     
-    status_choice = input("Select filter (a-d, default=b for testing): ").strip().lower() or 'b'
+    status_choice = input("Select filter (a-d, default=b): ").strip().lower() or 'b'
     
-    # Map choices
     method = 'parallel' if method_choice == '1' else 'sequential'
     status_map = {'a': None, 'b': 'open', 'c': 'closed', 'd': 'settled'}
     status = status_map.get(status_choice, 'open')
     
-    # Worker count for parallel
     workers = 10
     if method == 'parallel':
-        custom = input("\nNumber of parallel workers (default=10, max=30): ").strip()
+        custom = input("\nNumber of parallel workers (1-30, default=10): ").strip()
         if custom.isdigit():
-            workers = min(int(custom), 30)
+            workers = max(1, min(int(custom), 30))
     
-    # Create and run ingester
-    print("\nStarting ingestion...")
-    ingester = KalshiSimpleIngester(max_workers=workers, verify_ssl=False)
-    stats = ingester.run(method=method, status_filter=status)
+    print("\nStarting download...")
+    fetcher = KalshiMarketFetcher(max_workers=workers, verify_ssl=False)
+    stats = fetcher.run(method=method, status_filter=status)
     
-    # Offer to merge if successful
     if stats['total_markets'] > 0:
-        merge = input("\nMerge chunks into grouped files? (y/n): ").strip().lower()
+        merge = input("\nOrganize data into grouped files? (y/n): ").strip().lower()
         if merge == 'y':
             print("\nGroup by:")
-            print("  1. Status (open/closed/settled)")
-            print("  2. Series (INX, HIGHNYC, etc)")
-            print("  3. Event ticker")
-            print("  4. No grouping (single file)")
+            print("  1. Status")
+            print("  2. Series")
+            print("  3. Event")
+            print("  4. Single file (no grouping)")
             
             group_choice = input("Select (1-4, default=1): ").strip() or '1'
             group_map = {'1': 'status', '2': 'series', '3': 'event', '4': None}
             
-            ingester.merge_chunks(group_by=group_map.get(group_choice, 'status'))
+            fetcher.merge_chunks(group_by=group_map.get(group_choice, 'status'))
     
     print("\n✅ Complete!")
-    print(f"📁 All data saved in: {ingester.output_dir}/")
+    print(f"📁 Data location: {fetcher.output_dir}/")
 
 if __name__ == "__main__":
     main()
