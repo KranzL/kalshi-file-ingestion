@@ -1,19 +1,32 @@
-# kalshi market data fetcher
+# kalshi data ingestion suite
 
-a fast, efficient tool for downloading all market data from kalshi's public api.
+fast, efficient tools for downloading market data from kalshi's public api with flexible endpoint discovery and organized storage.
 
 ## what it does
 
-this script downloads market data from kalshi, a prediction market platform with 500,000+ markets covering politics, sports, economics, weather, and more. it can fetch everything from current election odds to weather predictions to economic indicators.
+this suite includes two complementary tools:
+- **api_discovery.py** - automatically discovers all available kalshi api endpoints
+- **flexible_ingestion.py** - intelligently ingests data from any discovered endpoint with smart folder organization
+
+downloads market data from kalshi, a prediction market platform with 500,000+ markets covering politics, sports, economics, weather, and more.
 
 ## features
 
+### flexible ingestion (flexible_ingestion.py)
+- **interactive menu system** - choose between bulk or targeted ingestion
+- **unlimited pagination** - fetches all available data automatically
+- **smart folder organization** - prevents crashes with 600k+ files
+- **hierarchical batching** - groups files into manageable 1,000-file batches
+- **endpoint-specific folders** - separates markets, events, series data
+- **progress tracking** - real-time batch completion updates
+- **no authentication needed** - uses kalshi's public api
+
+### api discovery (api_discovery.py)
+- **automatic endpoint discovery** - finds all available api endpoints
+- **capability detection** - identifies pagination and parameter requirements
 - **fast parallel downloading** - up to 30x faster than sequential fetching
 - **handles massive datasets** - efficiently processes 500k+ markets
-- **smart organization** - automatically groups markets by status, series, or event
 - **memory efficient** - saves data in chunks to avoid crashes
-- **resume friendly** - data saved immediately as it downloads
-- **no authentication needed** - uses kalshi's public api
 
 ## installation
 
@@ -28,14 +41,21 @@ pip3 install requests urllib3
 
 ## quick start
 
+### flexible ingestion (recommended)
 ```bash
-python3 kalshi_fetcher.py
+python3 flexible_ingestion.py
 ```
 
-follow the prompts:
-1. choose download method (parallel recommended)
-2. select market filter (start with "open" for testing)
-3. optionally organize the data after download
+follow the interactive menu:
+1. choose ingestion type: bulk (all data) or interactive (specific endpoints)
+2. script automatically creates organized folder structure
+3. data saves in real-time with batch progress tracking
+
+### api discovery + legacy fetcher
+```bash
+python3 api_discovery.py    # discover endpoints first
+python3 kalshi_fetcher.py   # then use legacy fetcher
+```
 
 ## usage options
 
@@ -60,31 +80,65 @@ more workers = faster download (default: 10, max: 30)
 
 ## output structure
 
+### flexible ingestion (new organized structure)
+```
+kalshi_ingestion_20250912_143052/
+├── markets/                   # markets endpoint data
+│   ├── batch_0000/           # records 0-999 (1000 files max)
+│   │   ├── kalshi_markets_TRUMPWIN_20250912.json
+│   │   ├── kalshi_markets_BIDENWIN_20250912.json
+│   │   └── ... (998 more files)
+│   ├── batch_0001/           # records 1000-1999
+│   ├── batch_0002/           # records 2000-2999
+│   └── ... (organized into manageable chunks)
+├── events/                    # events endpoint data
+│   ├── batch_0000/
+│   └── batch_0001/
+├── series/                    # series endpoint data
+│   └── batch_0000/
+└── kalshi_bulk_ingestion_summary_20250912.json
+```
+
+### legacy fetcher structure
 ```
 kalshi_markets_20250109_120000/
-├── chunks/                    # raw data chunks (one per api page)
-│   ├── chunk_000001.json
-│   ├── chunk_000002.json
-│   └── ...
-├── by_status/                 # organized by market status
-│   ├── open.json
-│   ├── closed.json
-│   └── settled.json
-├── by_series/                 # organized by series (inx, highnyc, etc)
-│   ├── inx.json
-│   ├── highnyc.json
-│   └── ...
-└── all_markets.json          # single file with all data (if requested)
+├── chunks/                    # raw data chunks
+├── by_status/                 # organized by status
+├── by_series/                 # organized by series
+└── all_markets.json          # single consolidated file
 ```
 
-## data organization options
+## ingestion options
 
-after downloading, you can organize markets by:
+### flexible ingestion modes
 
-1. **status** - groups markets by open/closed/settled
-2. **series** - groups by market series (e.g., all s&p 500 markets together)
+**bulk ingestion** - automatically ingests all available data from all endpoints
+- discovers and processes every api endpoint
+- unlimited pagination (fetches everything available)  
+- smart folder organization prevents file system crashes
+- ideal for comprehensive data collection
+
+**interactive ingestion** - targeted data collection with user control
+- select specific endpoints to ingest
+- control pagination limits and parameters
+- choose sample data or custom identifiers
+- perfect for focused research or testing
+
+### folder organization features
+
+- **endpoint separation** - markets, events, series in separate folders
+- **batch management** - maximum 1,000 files per folder
+- **vs code friendly** - prevents editor crashes with large datasets
+- **progress tracking** - real-time batch completion updates
+- **metadata inclusion** - each file contains batch and index information
+
+### legacy data organization
+
+after downloading with kalshi_fetcher.py, organize by:
+1. **status** - groups markets by open/closed/settled  
+2. **series** - groups by market series
 3. **event** - groups by specific events
-4. **single file** - combines everything into one large json file
+4. **single file** - combines everything into one json
 
 ## market data structure
 
@@ -124,6 +178,16 @@ each market object contains:
 
 ## performance expectations
 
+### flexible ingestion performance
+| data type | record count | ingestion time | storage size | folder structure |
+|-----------|--------------|----------------|--------------|------------------|
+| sample test | ~1k records | 30-60 seconds | ~5mb | 1 batch folder |
+| single endpoint | ~50k records | 5-15 minutes | ~200mb | 50 batch folders |
+| bulk ingestion | 600k+ records | 30-60 minutes | ~2-3gb | 600+ batch folders |
+
+*times vary based on api response speed and network conditions*
+
+### legacy fetcher performance  
 | market count | download time (10 workers) | download time (20 workers) | file size |
 |--------------|---------------------------|---------------------------|-----------|
 | ~3k (open)   | 30-60 seconds            | 15-30 seconds            | ~10mb     |
@@ -132,6 +196,14 @@ each market object contains:
 
 ## tips
 
+### flexible ingestion tips
+- start with interactive mode to test specific endpoints
+- bulk ingestion handles 600k+ files without crashing editors
+- each batch folder contains max 1,000 files for optimal performance  
+- progress tracking shows real-time batch completion
+- organized structure makes data analysis much easier
+
+### legacy fetcher tips
 - start with "open markets" to test everything works
 - use more workers if you have good internet
 - the chunks folder can be deleted after merging
@@ -144,7 +216,12 @@ each market object contains:
 the script automatically bypasses ssl verification for compatibility with macos. this is safe for public data but don't use for sensitive operations.
 
 ### memory issues
-if you run out of memory:
+flexible ingestion automatically handles memory efficiently:
+- saves files individually as they're processed
+- organizes into small batch folders (1,000 files max)
+- no large objects held in memory
+
+legacy fetcher memory issues:
 - the script saves chunks automatically, so data isn't lost
 - try organizing into grouped files instead of one large file
 - process chunks separately if needed
