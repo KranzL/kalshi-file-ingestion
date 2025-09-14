@@ -1,259 +1,194 @@
-# kalshi data ingestion suite
+# Kalshi Data Ingestion Suite
 
-fast, efficient tools for downloading market data from kalshi's public api with flexible endpoint discovery and organized storage.
+Comprehensive tools for downloading market data from Kalshi's public prediction market API with atomic processing and network resilience.
 
-## what it does
+## Overview
 
-this suite includes two complementary tools:
-- **api_discovery.py** - automatically discovers all available kalshi api endpoints
-- **flexible_ingestion.py** - intelligently ingests data from any discovered endpoint with smart folder organization
+This suite provides reliable data ingestion from Kalshi, a prediction market platform with over 500,000 markets covering politics, sports, economics, weather, and more. The system uses atomic endpoint processing to ensure complete data collection even with network interruptions.
 
-downloads market data from kalshi, a prediction market platform with 500,000+ markets covering politics, sports, economics, weather, and more.
+## Core Features
 
-## features
+### Atomic Processing Engine
+- Each endpoint processed completely from start to finish
+- No cross-endpoint state contamination
+- Automatic recovery from network timeouts
+- Extended retry sequences with exponential backoff
 
-### flexible ingestion (flexible_ingestion.py)
-- **interactive menu system** - choose between bulk or targeted ingestion
-- **unlimited pagination** - fetches all available data automatically
-- **smart folder organization** - prevents crashes with 600k+ files
-- **hierarchical batching** - groups files into manageable 1,000-file batches
-- **endpoint-specific folders** - separates markets, events, series data
-- **progress tracking** - real-time batch completion updates
-- **no authentication needed** - uses kalshi's public api
+### Network Resilience
+- 60-second request timeouts with 90-second recovery timeouts
+- Up to 10 timeout recovery attempts per failure
+- Total recovery time up to 55 minutes per network issue
+- Adaptive rate limiting prevents API throttling
 
-### api discovery (api_discovery.py)
-- **automatic endpoint discovery** - finds all available api endpoints
-- **capability detection** - identifies pagination and parameter requirements
-- **fast parallel downloading** - up to 30x faster than sequential fetching
-- **handles massive datasets** - efficiently processes 500k+ markets
-- **memory efficient** - saves data in chunks to avoid crashes
+### Smart Organization
+- Hierarchical folder structure prevents file system crashes
+- 1000 files per batch folder maximum
+- Endpoint-specific organization (markets, events, series)
+- Content-hash based deduplication within endpoints
 
-## installation
+### Comprehensive Logging
+- Real-time progress tracking with pages per second metrics
+- Detailed network failure reporting and recovery attempts
+- Complete session summaries with success rates
+- Individual endpoint completion verification
+
+## Installation
 
 ```bash
-# clone the repo or download the script
-git clone https://github.com/yourusername/kalshi-fetcher.git
-cd kalshi-fetcher
-
-# install required packages
+git clone https://github.com/yourusername/kalshi-file-ingestion.git
+cd kalshi-file-ingestion
 pip3 install requests urllib3
 ```
 
-## quick start
+## Quick Start
 
-### flexible ingestion (recommended)
+### Standard Usage
 ```bash
-python3 flexible_ingestion.py
+python3 ingestion.py
 ```
 
-follow the interactive menu:
-1. choose ingestion type: bulk (all data) or interactive (specific endpoints)
-2. script automatically creates organized folder structure
-3. data saves in real-time with batch progress tracking
-
-### api discovery + legacy fetcher
+### With API Discovery
 ```bash
-python3 api_discovery.py    # discover endpoints first
-python3 kalshi_fetcher.py   # then use legacy fetcher
+python3 api_discovery.py
+python3 ingestion.py
 ```
 
-## usage options
+The ingestion automatically loads discovered endpoints if available, otherwise uses defaults for markets, events, and series endpoints.
 
-### download methods
+## Data Structure
 
-- **parallel (recommended)** - uses multiple workers to fetch data simultaneously
-- **sequential** - fetches one page at a time, slower but more stable
+### Markets
+Individual tradeable contracts on specific outcomes. Each market contains:
+- ticker: Unique market identifier  
+- title: Market question or description
+- status: Current trading status
+- yes_price/no_price: Current contract prices
+- volume: Total contracts traded
+- close_time: Market expiration timestamp
 
-### market filters
+### Events  
+Collections of related markets grouped around single real-world events. Contains:
+- event_ticker: Event identifier
+- title: Event description
+- markets: List of associated market tickers
+- close_time: Event resolution date
 
-- **all markets** - downloads everything (500k+ markets, ~1-2gb)
-- **open markets** - only active markets (~3k markets)
-- **closed markets** - completed but not settled markets
-- **settled markets** - finished markets with results
+### Series
+Higher-level categories containing multiple related events over time. Includes:
+- series_ticker: Series identifier
+- title: Series description  
+- frequency: Recurring pattern information
+- events: Associated event list
 
-### parallel workers
+## Performance Characteristics
 
-more workers = faster download (default: 10, max: 30)
-- 10 workers: ~15-30 minutes for all markets
-- 20 workers: ~10-20 minutes for all markets
-- 30 workers: ~5-15 minutes for all markets
+### Request Optimization
+- Markets endpoint: 1000 records per request
+- Events endpoint: 100 records per request (API limit)
+- Series endpoint: 200 records per request
+- Adaptive delays prevent rate limiting
 
-## output structure
+### Expected Processing Times
+- Small datasets (under 50K records): 5-15 minutes
+- Medium datasets (100K-500K records): 15-45 minutes  
+- Large datasets (1M+ records): 45-90 minutes
+- Network issues extend times proportionally
 
-### flexible ingestion (new organized structure)
+### Output Organization
 ```
-kalshi_ingestion_20250912_143052/
-├── markets/                   # markets endpoint data
-│   ├── batch_0000/           # records 0-999 (1000 files max)
-│   │   ├── kalshi_markets_TRUMPWIN_20250912.json
-│   │   ├── kalshi_markets_BIDENWIN_20250912.json
-│   │   └── ... (998 more files)
-│   ├── batch_0001/           # records 1000-1999
-│   ├── batch_0002/           # records 2000-2999
-│   └── ... (organized into manageable chunks)
-├── events/                    # events endpoint data
-│   ├── batch_0000/
-│   └── batch_0001/
-├── series/                    # series endpoint data
+kalshi_atomic_ingestion_20240914_105307/
+├── atomic_ingestion.log
+├── atomic_session_summary_20240914_111603.json
+├── markets/
+│   ├── batch_0000/ (records 0-999)
+│   ├── batch_0001/ (records 1000-1999)
+│   └── batch_NNNN/ (continuing...)
+├── events/
 │   └── batch_0000/
-└── kalshi_bulk_ingestion_summary_20250912.json
+└── series/
+    └── batch_0000/
 ```
 
-### legacy fetcher structure
-```
-kalshi_markets_20250109_120000/
-├── chunks/                    # raw data chunks
-├── by_status/                 # organized by status
-├── by_series/                 # organized by series
-└── all_markets.json          # single consolidated file
-```
+## Network Resilience Features
 
-## ingestion options
+### Timeout Handling
+Normal request flow uses 5 retry attempts with 60-second timeouts. When timeouts persist, the system enters extended recovery mode with:
 
-### flexible ingestion modes
+1. Initial 60-second wait and retry
+2. 120-second wait and retry  
+3. 180-second wait and retry
+4. Continue up to 10 attempts (total 55+ minutes)
+5. Only abort after exhaustive recovery attempts
 
-**bulk ingestion** - automatically ingests all available data from all endpoints
-- discovers and processes every api endpoint
-- unlimited pagination (fetches everything available)  
-- smart folder organization prevents file system crashes
-- ideal for comprehensive data collection
+### Failure Recovery
+The system handles network issues gracefully:
+- Logs exact failure points with record counts
+- Saves all successfully retrieved data
+- Reports incomplete vs complete endpoints
+- Provides detailed failure analysis in session summary
 
-**interactive ingestion** - targeted data collection with user control
-- select specific endpoints to ingest
-- control pagination limits and parameters
-- choose sample data or custom identifiers
-- perfect for focused research or testing
+### Data Integrity
+- Content-hash based deduplication prevents duplicates within endpoints
+- No cross-endpoint duplicate detection to maintain data integrity
+- Each record includes hash verification for consistency checking
+- Batch processing with automatic checkpoint saves
 
-### folder organization features
+## File Format
 
-- **endpoint separation** - markets, events, series in separate folders
-- **batch management** - maximum 1,000 files per folder
-- **vs code friendly** - prevents editor crashes with large datasets
-- **progress tracking** - real-time batch completion updates
-- **metadata inclusion** - each file contains batch and index information
-
-### legacy data organization
-
-after downloading with kalshi_fetcher.py, organize by:
-1. **status** - groups markets by open/closed/settled  
-2. **series** - groups by market series
-3. **event** - groups by specific events
-4. **single file** - combines everything into one json
-
-## market data structure
-
-each market object contains:
-- `ticker` - unique market identifier
-- `title` - market question/title
-- `status` - open, closed, or settled
-- `yes_price` / `no_price` - current trading prices
-- `volume` - total contracts traded
-- `close_time` - when market closes
-- `event_ticker` - parent event identifier
-- and more...
-
-## example workflow
-
-### quick test (3k markets, ~1 minute)
-```
-1. run script
-2. select "1" for parallel
-3. select "b" for open markets only
-4. enter to use default 10 workers
-5. wait ~1 minute
-6. select "y" to organize
-7. select "1" to group by status
+Each saved record follows this structure:
+```json
+{
+  "endpoint": "/markets",
+  "ingestion_time": "20240914_111603", 
+  "record_id": "TRUMPWIN-24NOV05",
+  "record_hash": "a1b2c3d4e5f6789",
+  "batch_info": {
+    "record_index": 1500,
+    "batch_number": 1,
+    "total_records": 1030000
+  },
+  "data": {
+    // Original API response data
+  }
+}
 ```
 
-### full download (500k+ markets, ~20 minutes)
-```
-1. run script
-2. select "1" for parallel
-3. select "a" for all markets
-4. enter "20" for 20 workers
-5. wait ~20 minutes
-6. select "y" to organize
-7. select "2" to group by series
-```
+## Troubleshooting
 
-## performance expectations
+### Network Timeouts
+The system automatically handles network issues with extended retry sequences. Monitor logs for:
+- "TIMEOUT RECOVERY MODE" messages indicate extended retry attempts
+- "Network recovered" messages confirm successful recovery
+- "TIMEOUT RECOVERY FAILED" indicates network issues exceeded recovery limits
 
-### flexible ingestion performance
-| data type | record count | ingestion time | storage size | folder structure |
-|-----------|--------------|----------------|--------------|------------------|
-| sample test | ~1k records | 30-60 seconds | ~5mb | 1 batch folder |
-| single endpoint | ~50k records | 5-15 minutes | ~200mb | 50 batch folders |
-| bulk ingestion | 600k+ records | 30-60 minutes | ~2-3gb | 600+ batch folders |
+### Incomplete Datasets  
+If network issues prevent complete ingestion:
+- Check logs for failure point and record count before failure
+- Session summary shows successful vs failed endpoints
+- Re-run ingestion to attempt completion from beginning
+- Each run is independent with no state carried over
 
-*times vary based on api response speed and network conditions*
+### Memory Usage
+The system processes data in streaming fashion:
+- Records saved individually as processed
+- No large objects held in memory
+- Batch folders prevent directory size issues
+- Memory usage remains constant regardless of dataset size
 
-### legacy fetcher performance  
-| market count | download time (10 workers) | download time (20 workers) | file size |
-|--------------|---------------------------|---------------------------|-----------|
-| ~3k (open)   | 30-60 seconds            | 15-30 seconds            | ~10mb     |
-| ~50k (type)  | 2-5 minutes              | 1-3 minutes              | ~150mb    |
-| 500k+ (all)  | 15-30 minutes            | 10-20 minutes            | ~1.5gb    |
+## API Information
 
-## tips
+- Base URL: https://api.elections.kalshi.com/trade-api/v2
+- Authentication: Not required for public endpoints
+- Rate limiting: Handled automatically with adaptive delays
+- SSL verification: Disabled for compatibility (public data only)
 
-### flexible ingestion tips
-- start with interactive mode to test specific endpoints
-- bulk ingestion handles 600k+ files without crashing editors
-- each batch folder contains max 1,000 files for optimal performance  
-- progress tracking shows real-time batch completion
-- organized structure makes data analysis much easier
+## Session Summary
 
-### legacy fetcher tips
-- start with "open markets" to test everything works
-- use more workers if you have good internet
-- the chunks folder can be deleted after merging
-- organized files are easier to work with than one giant file
-- data includes historical markets going back to 2021
+Each ingestion generates a comprehensive session summary containing:
+- Total records processed and files saved
+- Success rates and failure analysis
+- Processing speed and duration metrics
+- Individual endpoint results with timing data
+- Network issue reports and recovery statistics
 
-## troubleshooting
-
-### ssl certificate errors
-the script automatically bypasses ssl verification for compatibility with macos. this is safe for public data but don't use for sensitive operations.
-
-### memory issues
-flexible ingestion automatically handles memory efficiently:
-- saves files individually as they're processed
-- organizes into small batch folders (1,000 files max)
-- no large objects held in memory
-
-legacy fetcher memory issues:
-- the script saves chunks automatically, so data isn't lost
-- try organizing into grouped files instead of one large file
-- process chunks separately if needed
-
-### slow downloads
-- increase worker count (up to 30)
-- check your internet connection
-- try during off-peak hours
-
-## api notes
-
-- uses kalshi's public api at `api.elections.kalshi.com`
-- no authentication required
-- rate limiting is handled automatically
-- api returns max 1000 markets per request
-
-## use cases
-
-- **data analysis** - analyze prediction market trends
-- **trading bots** - build automated trading strategies
-- **research** - study market efficiency and predictions
-- **monitoring** - track specific events or categories
-- **archival** - preserve historical market data
-
-## license
-
-mit - feel free to use, modify, and distribute
-
-## contributing
-
-improvements welcome! please submit pull requests or open issues for bugs/features.
-
-## disclaimer
-
-this tool downloads public market data only. always respect kalshi's terms of service and api usage guidelines.
+This summary enables analysis of ingestion quality and identification of any data collection issues.
